@@ -77,8 +77,8 @@ jobs:
               COMMENT_BODY=$( \
               jq -r --arg SCAN_URL "$SCAN_URL" \
                 '"### 🚨 Alertas de Segurança Críticos (Semgrep)\n\nEncontramos os seguintes problemas que precisam de atenção no seu Pull Request:\n" +
-                # 1. Filtra apenas os ERRORs e, para cada um, cria um bloco <details>
-                ([.results[] | select(.extra.severity == "ERROR")] | map("<details><summary>🚨 **\(.check_id)** em `\(.path)`</summary>\n\n**Severidade:** `\(.extra.severity)`\n**Arquivo:** `\(.path):\(.start.line)`\n> **Mensagem:** \(.extra.message)\n\n</details>") | join("\n")) +
+                <details>
+                ([.results[] | select(.extra.severity == "ERROR")] | map("<details><summary>🚨 <bold>\(.check_id)</bold> </summary>\n\n**Severidade:** `\(.extra.severity)`\n**Arquivo:** `\(.path):\(.start.line)`\n> **Mensagem:** \(.extra.message)\n\n</details>") | join("\n")) +
                 "\n\n---\n\n[**Ver todos os detalhes no Code Scanning ↗**](\($SCAN_URL))"' \
                 "$JSON_FILENAME" )
 
