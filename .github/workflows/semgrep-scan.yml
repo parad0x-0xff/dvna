@@ -138,4 +138,5 @@ jobs:
         run: |
           if [ "$HIGH_COUNT" -ge 1 ]; then
             echo "::error::Foram identificadas vulnerabilidades com severidade alta."
+            exit 1
           fi
