@@ -74,13 +74,20 @@ jobs:
             if [ "$HIGH_COUNT" -ge 1 ]; then
               SCAN_URL="${{ github.server_url }}/${{ github.repository }}/security/code-scanning?query=pr:${{ github.event.pull_request.number }}"
               
-              COMMENT_BODY=$(jq -r --arg SCAN_URL "$SCAN_URL" '"### Alertas de Segurança do Semgrep\n\nEncontramos os seguintes problemas no seu Pull Request:\n\n---\n| Severidade | Regra | Arquivo | Linha |\n| :--- | :--- | :--- | :--- |\n" + ([.results[] | select(.extra.severity == "ERROR")] | map("| `\(.extra.severity)` | `\(.check_id)` | `\(.path)` | `\(.start.line)` |\n> **Mensagem:** \(.extra.message)") | join("\n---\n")) + "\n\n---\n\n[**Ver todos os detalhes no Code Scanning ↗**](\($SCAN_URL))"' "$JSON_FILENAME")
-              echo "$COMMENT_BODY" | gh pr comment $PR_NUMBER --body-file -
-              echo "Comentário postado no PR #$PR_NUMBER."
+              COMMENT_BODY=$( \
+              jq -r --arg SCAN_URL "$SCAN_URL" \
+                '"### 🚨 Alertas de Segurança Críticos (Semgrep)\n\nEncontramos os seguintes problemas que precisam de atenção no seu Pull Request:\n" +
+                <details>
+                ([.results[] | select(.extra.severity == "ERROR")] | map("<details><summary>🚨 <bold>\(.check_id)</bold> </summary>\n\n**Severidade:** `\(.extra.severity)`\n**Arquivo:** `\(.path):\(.start.line)`\n> **Mensagem:** \(.extra.message)\n\n</details>") | join("\n")) +
+                "\n\n---\n\n[**Ver todos os detalhes no Code Scanning ↗**](\($SCAN_URL))"' \
+                "$JSON_FILENAME" )
+
+                echo "$COMMENT_BODY" | gh pr comment $PR_NUMBER --body-file -
+                echo "Comentário postado no PR #$PR_NUMBER."
             fi
-          else
-            echo "Suas alterações estão **ben seguras**."
-          fi
+            else
+              echo "Suas alterações estão **ben seguras**."
+            fi
         env:
           SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

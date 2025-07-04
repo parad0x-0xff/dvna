@@ -8,4 +8,7 @@ WORKDIR /app
 
 RUN npm install -g nodemon
 
-CMD ["/bin/bash", "/app/entrypoint-dev.sh"]
+RUN chmod +x /app/entrypoint.sh \
+	&& npm install
+
+CMD ["bash", "/app/entrypoint.sh"]
