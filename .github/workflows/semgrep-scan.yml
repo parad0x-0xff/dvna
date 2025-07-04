@@ -84,9 +84,9 @@ jobs:
                 echo "$COMMENT_BODY" | gh pr comment $PR_NUMBER --body-file -
                 echo "Comentário postado no PR #$PR_NUMBER."
             fi
-            else
-              echo "Suas alterações estão **ben seguras**."
-            fi
+          else
+            echo "Suas alterações estão **ben seguras**."
+          fi
         env:
           SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
