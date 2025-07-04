@@ -74,13 +74,33 @@ jobs:
             if [ "$HIGH_COUNT" -ge 1 ]; then
               SCAN_URL="${{ github.server_url }}/${{ github.repository }}/security/code-scanning?query=pr:${{ github.event.pull_request.number }}"
               
-              COMMENT_BODY=$(jq -r --arg SCAN_URL "$SCAN_URL" '"### Alertas de Segurança do Semgrep\n\nEncontramos os seguintes problemas no seu Pull Request:\n\n---\n| Severidade | Regra | Arquivo | Linha |\n| :--- | :--- | :--- | :--- |\n" + ([.results[] | select(.extra.severity == "ERROR")] | map("| `\(.extra.severity)` | `\(.check_id)` | `\(.path)` | `\(.start.line)` |\n> **Mensagem:** \(.extra.message)") | join("\n---\n")) + "\n\n---\n\n[**Ver todos os detalhes no Code Scanning ↗**](\($SCAN_URL))"' "$JSON_FILENAME")
-              echo "$COMMENT_BODY" | gh pr comment $PR_NUMBER --body-file -
-              echo "Comentário postado no PR #$PR_NUMBER."
+              COMMENT_BODY="### 🚨 Alertas de Segurança Críticos (Semgrep)\n\nEncontramos os seguintes problemas que precisam de atenção no seu Pull Request. Para uma visão completa, [acesse o Code Scanning ↗]($SCAN_URL).\n\n---"
+
+              # Usa 'jq' para extrair os dados e um loop 'while' para processar cada vulnerabilidade
+              # O formato de saída do jq é: caminho|linha|regra|mensagem
+              jq -r '.results[] | select(.extra.severity == "ERROR") | "\(.path)|\(.start.line)|\(.check_id)|\(.extra.message)"' "$JSON_FILENAME" | \
+              while IFS='|' read -r path line rule_id message; do
+                # Para cada vulnerabilidade, anexa um bloco de Markdown ao corpo do comentário
+                # A tag <details> cria uma seção que pode ser expandida/recolhida
+                COMMENT_BODY+=$(cat <<EOF
+
+                <details>
+                <summary>🚨 **${rule_id}**</summary>
+
+                **Severidade:** \`ERROR\`
+                **Arquivo:** \`${path}:${line}\`
+                > **Mensagem:** ${message}
+
+                </details>
+                EOF
+                )
+              done
+                echo "$COMMENT_BODY" | gh pr comment $PR_NUMBER --body-file -
+                echo "Comentário postado no PR #$PR_NUMBER."
             fi
-          else
-            echo "Suas alterações estão **ben seguras**."
-          fi
+            else
+              echo "Suas alterações estão **ben seguras**."
+            fi
         env:
           SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

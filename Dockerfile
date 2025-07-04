@@ -7,7 +7,4 @@ WORKDIR /app
 
 COPY . .
 
-RUN chmod +x /app/entrypoint.sh \
-	&& npm install
-
-CMD ["bash", "/app/entrypoint.sh"]
+CMD ["node", "server.js"]
