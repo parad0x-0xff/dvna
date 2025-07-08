@@ -100,6 +100,30 @@ jobs:
             --exclude 'node_modules/**,dist/**,build/**,*.min.js,*.bundle.js' \
             --timeout 1800 \
             --max-memory 4096
+
+          if [ -f "$JSON_FILENAME" ] && [ $(jq '.results | length' "$JSON_FILENAME") -gt 0 ]; then
+            echo "Vulnerabilidades encontradas."
+            
+            # Conta as vulnerabilidades com severidade alta
+            HIGH_COUNT=$(jq '[.results[].extra | select(.severity == "ERROR")] | length' "$JSON_FILENAME")
+            MEDIUM_COUNT=$(jq '[.results[].extra | select(.severity == "WARNING")] | length' "$JSON_FILENAME")
+            
+            if [ "$HIGH_COUNT" -ge 1 ] || [ "$MEDIUM_COUNT" -ge 1 ]; then
+              SCAN_URL="${{ github.server_url }}/${{ github.repository }}/security/code-scanning?query=pr:${{ github.event.pull_request.number }}"
+              
+              COMMENT_BODY=$( \
+              jq -r --arg SCAN_URL "$SCAN_URL" \
+                '"###  Alertas de Segurança Críticos (Semgrep)\n\nEncontramos os seguintes problemas que precisam de atenção no seu Pull Request:\n\n" +
+                "<details><summary>Vulnerabilidades</summary>\n\n" +
+                ([.results[] | select(.extra.severity == "ERROR")] | map("<details><summary> <strong>\(.check_id)</strong></summary>\n\n**Severidade:** `\(.extra.severity)`\n**Arquivo:** `\(.path):\(.start.line)`\n<blockquote><p>Mensagem: \(.extra.message)</p></blockquote>\n\n</details>") | join("\n")) +"\n\n</details>" +
+                "\n\n---\n\n[**Ver todos os detalhes no Code Scanning ↗**](\( $SCAN_URL))"' "$JSON_FILENAME" )
+
+                echo "$COMMENT_BODY" | gh pr comment $PR_NUMBER --body-file -
+                echo "Comentário postado no PR #$PR_NUMBER."
+            fi
+          else
+            echo "Suas alterações estão **ben seguras**."
+          fi
         continue-on-error: true
         env:
           SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
