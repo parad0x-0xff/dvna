@@ -127,6 +127,7 @@ jobs:
         continue-on-error: true
         env:
           SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Count, Display, and Check Vulnerabilities
         id: count_vulns
