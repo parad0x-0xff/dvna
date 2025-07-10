@@ -4,7 +4,7 @@ on:
   workflow_call:
     inputs:
       scan-mode:
-        description: 'Modo de scan: "diff" para PRs ou "full" para a branch principal.'
+        description: 'Modo de scan: "pr" para pull_request, "push" para branch principal.'
         required: true
         type: string
     secrets:
@@ -44,8 +44,8 @@ jobs:
 
       # Passo 3: O seu passo de scan agora roda diretamente no runner
       - name: Run Semgrep on Changed Files
-        if: ${{ inputs.scan-mode == 'diff'}}
-        id: semgrep-diff
+        if: ${{ inputs.scan-mode == 'pr'}}
+        id: semgrep-pr
         run: |
           BASE_BRANCH="origin/${{ github.base_ref }}"
           CHANGED_FILES=$(git diff --name-only --diff-filter=ACMR $BASE_BRANCH...HEAD)
@@ -90,9 +90,9 @@ jobs:
           SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Run Semgrep Full scan
-        if: ${{ inputs.scan-mode == 'full'}}
-        id: semgrep-full
+      - name: Run Semgrep Push scan
+        if: ${{ inputs.scan-mode == 'push'}}
+        id: semgrep-push
         run: |
           semgrep scan \
             --sarif-output semgrep.sarif \
@@ -104,12 +104,12 @@ jobs:
           if [ -f "$JSON_FILENAME" ] && [ $(jq '.results | length' "$JSON_FILENAME") -gt 0 ]; then
             echo "Vulnerabilidades encontradas."
             
-            # Conta as vulnerabilidades com severidade alta
+            # Conta as vulnerabilidades com severidade alta e média
             HIGH_COUNT=$(jq '[.results[].extra | select(.severity == "ERROR")] | length' "$JSON_FILENAME")
             MEDIUM_COUNT=$(jq '[.results[].extra | select(.severity == "WARNING")] | length' "$JSON_FILENAME")
             
             if [ "$HIGH_COUNT" -ge 1 ] || [ "$MEDIUM_COUNT" -ge 1 ]; then
-              SCAN_URL="${{ github.server_url }}/${{ github.repository }}/security/code-scanning?query=pr:${{ github.event.pull_request.number }}"
+              COMMIT_URL="${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}"
               
               COMMENT_BODY=$( \
               jq -r --arg SCAN_URL "$SCAN_URL" \
@@ -118,8 +118,7 @@ jobs:
                 ([.results[] | select(.extra.severity == "ERROR")] | map("<details><summary> <strong>\(.check_id)</strong></summary>\n\n**Severidade:** `\(.extra.severity)`\n**Arquivo:** `\(.path):\(.start.line)`\n<blockquote><p>Mensagem: \(.extra.message)</p></blockquote>\n\n</details>") | join("\n")) +"\n\n</details>" +
                 "\n\n---\n\n[**Ver todos os detalhes no Code Scanning ↗**](\( $SCAN_URL))"' "$JSON_FILENAME" )
 
-                echo "$COMMENT_BODY" | gh pr comment $PR_NUMBER --body-file -
-                echo "Comentário postado no PR #$PR_NUMBER."
+                echo "$COMMENT_BODY"
             fi
           else
             echo "Suas alterações estão **ben seguras**."
@@ -158,7 +157,7 @@ jobs:
           retention-days: 30
 
       - name: Pipeline break
-        if: ${{ inputs.scan-mode == 'diff' }}
+        if: ${{ inputs.scan-mode == 'pull_request' }}
         id: pipeline_break
         run: |
           if [ "$HIGH_COUNT" -ge 1 ]; then
