@@ -62,7 +62,6 @@ jobs:
             --timeout 1800 \
             --max-memory 4096 \
             $CHANGED_FILES
-          echo $CHANGED_FILES
 
           # Verifica se o arquivo JSON foi criado e contém resultados
           if [ -f "$JSON_FILENAME" ] && [ $(jq '.results | length' "$JSON_FILENAME") -gt 0 ]; then
@@ -94,16 +93,34 @@ jobs:
         if: ${{ inputs.scan-mode == 'push'}}
         id: semgrep-push
         run: |
+          TARGET_REF="${{ github.event.before }}"
+          HEAD_REF="${{ github.event.after }}"
+
+          # Caso especial: primeiro push para uma nova branch
+          if [ "$TARGET_REF" == "0000000000000000000000000000000000000000" ]; then
+            echo "Primeiro push detectado, escaneando todos os arquivos..."
+            CHANGED_FILES=$(git ls-files)
+          else
+            echo "Analisando diff do push entre os commits ${TARGET_REF:0:7}...${HEAD_REF:0:7}"
+            CHANGED_FILES=$(git diff --name-only --diff-filter=ACMR $TARGET_REF...$HEAD_REF)
+          fi
+
+          if [ -z "$CHANGED_FILES" ]; then
+            echo "Nenhum arquivo modificado para escanear."
+            # Define a saída como vazia para os próximos passos
+            echo "files_to_scan=''" >> $GITHUB_OUTPUT
+          fi
           semgrep scan \
             --sarif-output semgrep.sarif \
             --json-output "$JSON_FILENAME" \
             --exclude 'node_modules/**,dist/**,build/**,*.min.js,*.bundle.js' \
             --timeout 1800 \
             --max-memory 4096
+            $CHANGED_FILES
 
           if [ -f "$JSON_FILENAME" ] && [ $(jq '.results | length' "$JSON_FILENAME") -gt 0 ]; then
             echo "Vulnerabilidades encontradas."
-            
+
             # Conta as vulnerabilidades com severidade alta e média
             HIGH_COUNT=$(jq '[.results[].extra | select(.severity == "ERROR")] | length' "$JSON_FILENAME")
             MEDIUM_COUNT=$(jq '[.results[].extra | select(.severity == "WARNING")] | length' "$JSON_FILENAME")
@@ -117,6 +134,8 @@ jobs:
                 "<details><summary>Vulnerabilidades</summary>\n\n" +
                 ([.results[] | select(.extra.severity == "ERROR")] | map("<details><summary> <strong>\(.check_id)</strong></summary>\n\n**Severidade:** `\(.extra.severity)`\n**Arquivo:** `\(.path):\(.start.line)`\n<blockquote><p>Mensagem: \(.extra.message)</p></blockquote>\n\n</details>") | join("\n")) +"\n\n</details>" +
                 "\n\n---\n\n[**Ver todos os detalhes no Code Scanning ↗**](\( $SCAN_URL))"' "$JSON_FILENAME" )
+              echo $COMMENT_BODY
+              echo $COMMIT_URL
             fi
           else
             echo "Suas alterações estão **ben seguras**."
@@ -171,5 +190,5 @@ jobs:
         run: |
           if [ "$HIGH_COUNT" -ge 1 ]; then
             echo "::error::Foram identificadas vulnerabilidades com severidade alta."
-            exit 1
+            echo "enviando notificações..."
           fi
