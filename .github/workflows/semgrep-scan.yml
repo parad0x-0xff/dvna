@@ -108,14 +108,14 @@ jobs:
           if [ -z "$CHANGED_FILES" ]; then
             echo "Nenhum arquivo modificado para escanear."
             # Define a saída como vazia para os próximos passos
-            CHANGED_FILES=''
+            CHANGED_FILES='' >> $GITHUB_OUTPUT
           else
             echo "Arquivos a serem escaneados:"
             echo "CHANGED_FILES=$(echo "$CHANGED_FILES" | tr '\n' ' ')" >> $GITHUB_OUTPUT
           fi 
 
       - name: Run Semgrep Push scan
-        if: steps.changed_files.outputs.files_to_scan != ''
+        if: $CHANGED_FILES != ''
         id: semgrep-push
         run: |
           semgrep scan \
