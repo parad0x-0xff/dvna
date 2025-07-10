@@ -43,7 +43,7 @@ jobs:
           echo "JSON_FILENAME=semgrep-${REPO_FULL_NAME##*/}-${{ github.event.pull_request.number }}-$(date -u +"%Y-%m-%d").json" >> $GITHUB_ENV
 
       # Passo 3: O seu passo de scan agora roda diretamente no runner
-      - name: Run Semgrep on Changed Files
+      - name: Run Semgrep on Pull Request
         if: ${{ inputs.scan-mode == 'pr'}}
         id: semgrep-pr
         run: |
@@ -128,6 +128,18 @@ jobs:
           SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Run Semgrep Full scan
+        if: ${{ inputs.scan-mode == 'push'}}
+        id: semgrep-full
+        run: |
+          rm -f "$JSON_FILENAME"
+          semgrep scan \
+            --sarif-output semgrep.sarif \
+            --json-output "$JSON_FILENAME" \
+            --exclude 'node_modules/**,dist/**,build/**,*.min.js,*.bundle.js' \
+            --timeout 1800 \
+            --max-memory 4096
+
       - name: Count, Display, and Check Vulnerabilities
         id: count_vulns
         run: |
@@ -156,7 +168,7 @@ jobs:
           path: "${{ env.JSON_FILENAME }}"
           retention-days: 30
 
-      - name: Pipeline break
+      - name: Notification
         if: ${{ inputs.scan-mode == 'pull_request' }}
         id: pipeline_break
         run: |
