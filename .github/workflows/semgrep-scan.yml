@@ -89,9 +89,9 @@ jobs:
           SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Run Semgrep Push scan
+      - name: Detect push changed files
+        id: detect_push_changed_files
         if: ${{ inputs.scan-mode == 'push'}}
-        id: semgrep-push
         run: |
           TARGET_REF="${{ github.event.before }}"
           HEAD_REF="${{ github.event.after }}"
@@ -108,8 +108,16 @@ jobs:
           if [ -z "$CHANGED_FILES" ]; then
             echo "Nenhum arquivo modificado para escanear."
             # Define a saída como vazia para os próximos passos
-            echo "files_to_scan=''" >> $GITHUB_OUTPUT
-          fi
+            CHANGED_FILES=''
+          else
+            echo "Arquivos a serem escaneados:"
+            echo "CHANGED_FILES=$(echo "$CHANGED_FILES" | tr '\n' ' ')" >> $GITHUB_OUTPUT
+          fi 
+
+      - name: Run Semgrep Push scan
+        if: steps.changed_files.outputs.files_to_scan != ''
+        id: semgrep-push
+        run: |
           semgrep scan \
             --sarif-output semgrep.sarif \
             --json-output "$JSON_FILENAME" \
@@ -120,7 +128,6 @@ jobs:
 
           if [ -f "$JSON_FILENAME" ] && [ $(jq '.results | length' "$JSON_FILENAME") -gt 0 ]; then
             echo "Vulnerabilidades encontradas."
-
             # Conta as vulnerabilidades com severidade alta e média
             HIGH_COUNT=$(jq '[.results[].extra | select(.severity == "ERROR")] | length' "$JSON_FILENAME")
             MEDIUM_COUNT=$(jq '[.results[].extra | select(.severity == "WARNING")] | length' "$JSON_FILENAME")
