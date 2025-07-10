@@ -33,7 +33,7 @@ jobs:
       - name: Install Semgrep
         run: pip install semgrep
 
-      - name: Gather PR Information
+      - name: Gather Information
         id: pr_info
         run: |
           REPO_FULL_NAME="${{ github.repository }}"
@@ -115,7 +115,7 @@ jobs:
             --json-output "$JSON_FILENAME" \
             --exclude 'node_modules/**,dist/**,build/**,*.min.js,*.bundle.js' \
             --timeout 1800 \
-            --max-memory 4096
+            --max-memory 4096 \
             $CHANGED_FILES
 
           if [ -f "$JSON_FILENAME" ] && [ $(jq '.results | length' "$JSON_FILENAME") -gt 0 ]; then
