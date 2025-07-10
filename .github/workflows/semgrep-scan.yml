@@ -117,8 +117,6 @@ jobs:
                 "<details><summary>Vulnerabilidades</summary>\n\n" +
                 ([.results[] | select(.extra.severity == "ERROR")] | map("<details><summary> <strong>\(.check_id)</strong></summary>\n\n**Severidade:** `\(.extra.severity)`\n**Arquivo:** `\(.path):\(.start.line)`\n<blockquote><p>Mensagem: \(.extra.message)</p></blockquote>\n\n</details>") | join("\n")) +"\n\n</details>" +
                 "\n\n---\n\n[**Ver todos os detalhes no Code Scanning ↗**](\( $SCAN_URL))"' "$JSON_FILENAME" )
-
-                echo "$COMMENT_BODY"
             fi
           else
             echo "Suas alterações estão **ben seguras**."
@@ -168,9 +166,8 @@ jobs:
           path: "${{ env.JSON_FILENAME }}"
           retention-days: 30
 
-      - name: Notification
-        if: ${{ inputs.scan-mode == 'pull_request' }}
-        id: pipeline_break
+      - name: Slack notification
+        id: slack-notification
         run: |
           if [ "$HIGH_COUNT" -ge 1 ]; then
             echo "::error::Foram identificadas vulnerabilidades com severidade alta."
