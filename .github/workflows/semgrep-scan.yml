@@ -112,6 +112,7 @@ jobs:
           else
             echo "Arquivos a serem escaneados:"
             echo "CHANGED_FILES=$(echo "$CHANGED_FILES" | tr '\n' ' ')" >> $GITHUB_OUTPUT
+            echo $CHANGED_FILES
           fi 
 
       - name: Run Semgrep Push scan
@@ -124,7 +125,7 @@ jobs:
             --exclude 'node_modules/**,dist/**,build/**,*.min.js,*.bundle.js' \
             --timeout 1800 \
             --max-memory 4096 \
-            $CHANGED_FILES
+            ${{ steps.detect_push_changed_files.outputs.changed_files }}
 
           if [ -f "$JSON_FILENAME" ] && [ $(jq '.results | length' "$JSON_FILENAME") -gt 0 ]; then
             echo "Vulnerabilidades encontradas."
