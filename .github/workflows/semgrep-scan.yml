@@ -115,7 +115,7 @@ jobs:
           fi 
 
       - name: Run Semgrep Push scan
-        if: $CHANGED_FILES != ''
+        if: ${{ steps.detect_push_changed_files.outputs.changed_files != '' }}
         id: semgrep-push
         run: |
           semgrep scan \
