@@ -128,10 +128,10 @@ jobs:
       - name: Count, Display, and Check Vulnerabilities
         id: count_vulns
         run: |
-          CRITICAL_COUNT=$(jq '[.results[].extra | select(.extra.severity == "CRITICAL")] | length' "$JSON_FILENAME")
-          HIGH_COUNT=$(jq '[.results[].extra | select(.extra.severity == "ERROR")] | length' "$JSON_FILENAME")
-          MEDIUM_COUNT=$(jq '[.results[].extra | select(.extra.severity == "WARNING")] | length' "$JSON_FILENAME")
-          LOW_COUNT=$(jq '[.results[].extra | select(.extra.severity == "INFO")] | length' "$JSON_FILENAME")
+          CRITICAL_COUNT=$(jq '[.results[].extra | select(.severity == "CRITICAL")] | length' "$JSON_FILENAME")
+          HIGH_COUNT=$(jq '[.results[].extra | select(.severity == "ERROR")] | length' "$JSON_FILENAME")
+          MEDIUM_COUNT=$(jq '[.results[].extra | select(.severity == "WARNING")] | length' "$JSON_FILENAME")
+          LOW_COUNT=$(jq '[.results[].extra | select(.severity == "INFO")] | length' "$JSON_FILENAME")
           echo "CRITICAL_COUNT=$CRITICAL_COUNT" >> $GITHUB_ENV
           echo "HIGH_COUNT=$HIGH_COUNT" >> $GITHUB_ENV
           echo "MEDIUM_COUNT=$MEDIUM_COUNT" >> $GITHUB_ENV
