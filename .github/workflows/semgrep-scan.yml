@@ -40,7 +40,7 @@ jobs:
           echo "REPO_NAME=${REPO_FULL_NAME##*/}" >> $GITHUB_ENV
           echo "PR_NUMBER=${{ github.event.pull_request.number }}" >> $GITHUB_ENV
           echo "TIMESTAMP=$(date -u +"%Y-%m-%d")" >> $GITHUB_ENV
-          echo "JSON_FILENAME=semgrep-${REPO_FULL_NAME##*/}-${{ github.event.pull_request.number }}-$(date -u +"%Y-%m-%d").json" >> $GITHUB_ENV
+          echo "JSON_FILENAME=semgrep-${REPO_FULL_NAME##*/}-$(date -u +"%Y-%m-%d").json" >> $GITHUB_ENV
 
       # Passo 3: O seu passo de scan agora roda diretamente no runner
       - name: Run Semgrep on Pull Request
@@ -66,17 +66,17 @@ jobs:
           # Verifica se o arquivo JSON foi criado e contém resultados
           if [ -f "$JSON_FILENAME" ] && [ $(jq '.results | length' "$JSON_FILENAME") -gt 0 ]; then
             echo "Vulnerabilidades encontradas. Formatando o comentário para o PR..."
+
+            # Conta as vulnerabilidades com severidade crítica alta
+            VULNERABILITIES=$(_COUNT=$(jq '[.results[].extra | select(.extra.severity | IN("ERROR", "CRITICAL"))] | length' "$JSON_FILENAME")
             
-            # Conta as vulnerabilidades com severidade alta
-            HIGH_COUNT=$(jq '[.results[].extra | select(.severity == "ERROR")] | length' "$JSON_FILENAME")
-            
-            if [ "$HIGH_COUNT" -ge 1 ]; then
+            if [ "$VULNERABILITIES" -ge 1 ]; then
               SCAN_URL="${{ github.server_url }}/${{ github.repository }}/security/code-scanning?query=pr:${{ github.event.pull_request.number }}"
               
               COMMENT_BODY=$( \
               jq -r --arg SCAN_URL "$SCAN_URL" \
                 '"### 🚨 Alertas de Segurança Críticos (Semgrep)\n\nEncontramos os seguintes problemas que precisam de atenção no seu Pull Request:\n\n" +
-                ([.results[] | select(.extra.severity == "ERROR")] | map("<details><summary>🚨 <strong>\(.check_id)</strong></summary>\n\n**Severidade:** `\(.extra.severity)`\n**Arquivo:** `\(.path):\(.start.line)`\n<blockquote><p>Mensagem: \(.extra.message)</p></blockquote>\n\n</details>") | join("\n")) +
+                ([.results[] | select(.extra.severity | IN("ERROR", "CRITICAL"))] | map("<details><summary>🚨 <strong>\(.check_id)</strong></summary>\n\n**Severidade:** `\(.extra.severity)`\n**Arquivo:** `\(.path):\(.start.line)`\n<blockquote><p>Mensagem: \(.extra.message)</p></blockquote>\n\n</details>") | join("\n")) +
                 "\n\n---\n\n[**Ver todos os detalhes no Code Scanning ↗**](\($SCAN_URL))"' "$JSON_FILENAME" )
 
                 echo "$COMMENT_BODY" | gh pr comment $PR_NUMBER --body-file -
@@ -96,14 +96,8 @@ jobs:
           TARGET_REF="${{ github.event.before }}"
           HEAD_REF="${{ github.event.after }}"
 
-          # Caso especial: primeiro push para uma nova branch
-          if [ "$TARGET_REF" == "0000000000000000000000000000000000000000" ]; then
-            echo "Primeiro push detectado, escaneando todos os arquivos..."
-            CHANGED_FILES=$(git ls-files)
-          else
-            echo "Analisando diff do push entre os commits ${TARGET_REF:0:7}...${HEAD_REF:0:7}"
-            CHANGED_FILES=$(git diff --name-only --diff-filter=ACMR $TARGET_REF...$HEAD_REF)
-          fi
+          echo "Analisando diff do push entre os commits ${TARGET_REF:0:7}...${HEAD_REF:0:7}"
+          CHANGED_FILES=$(git diff --name-only --diff-filter=ACMR $TARGET_REF...$HEAD_REF)
 
           if [ -z "$CHANGED_FILES" ]; then
             echo "Nenhum arquivo modificado para escanear."
@@ -126,32 +120,96 @@ jobs:
             --timeout 1800 \
             --max-memory 4096 \
             ${{ steps.detect_push_changed_files.outputs.changed_files }}
-
-          if [ -f "$JSON_FILENAME" ] && [ $(jq '.results | length' "$JSON_FILENAME") -gt 0 ]; then
-            echo "Vulnerabilidades encontradas."
-            # Conta as vulnerabilidades com severidade alta e média
-            HIGH_COUNT=$(jq '[.results[].extra | select(.severity == "ERROR")] | length' "$JSON_FILENAME")
-            MEDIUM_COUNT=$(jq '[.results[].extra | select(.severity == "WARNING")] | length' "$JSON_FILENAME")
-            
-            if [ "$HIGH_COUNT" -ge 1 ] || [ "$MEDIUM_COUNT" -ge 1 ]; then
-              COMMIT_URL="${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}"
-              
-              COMMENT_BODY=$( \
-              jq -r --arg SCAN_URL "$SCAN_URL" \
-                '"###  Alertas de Segurança Críticos (Semgrep)\n\nEncontramos os seguintes problemas que precisam de atenção no seu Pull Request:\n\n" +
-                "<details><summary>Vulnerabilidades</summary>\n\n" +
-                ([.results[] | select(.extra.severity == "ERROR")] | map("<details><summary> <strong>\(.check_id)</strong></summary>\n\n**Severidade:** `\(.extra.severity)`\n**Arquivo:** `\(.path):\(.start.line)`\n<blockquote><p>Mensagem: \(.extra.message)</p></blockquote>\n\n</details>") | join("\n")) +"\n\n</details>" +
-                "\n\n---\n\n[**Ver todos os detalhes no Code Scanning ↗**](\( $SCAN_URL))"' "$JSON_FILENAME" )
-              echo $COMMENT_BODY
-              echo $COMMIT_URL
-            fi
-          else
-            echo "Suas alterações estão **ben seguras**."
-          fi
         continue-on-error: true
         env:
           SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Count, Display, and Check Vulnerabilities
+        id: count_vulns
+        run: |
+          CRITICAL_COUNT=$(jq '[.results[].extra | select(.extra.severity == "CRITICAL")] | length' "$JSON_FILENAME")
+          HIGH_COUNT=$(jq '[.results[].extra | select(.extra.severity == "ERROR")] | length' "$JSON_FILENAME")
+          MEDIUM_COUNT=$(jq '[.results[].extra | select(.severity == "WARNING")] | length' "$JSON_FILENAME")
+          LOW_COUNT=$(jq '[.results[].extra | select(.severity == "INFO")] | length' "$JSON_FILENAME")
+          echo "CRITICAL_COUNT=$CRITICAL_COUNT" >> $GITHUB_ENV
+          echo "HIGH_COUNT=$HIGH_COUNT" >> $GITHUB_ENV
+          echo "MEDIUM_COUNT=$MEDIUM_COUNT" >> $GITHUB_ENV
+          echo "LOW_COUNT=$LOW_COUNT" >> $GITHUB_ENV
+          echo "Repository: $REPO_NAME"
+          echo "PR Number: $PR_NUMBER"
+          echo "Scan Timestamp: $TIMESTAMP"
+          echo "Vulnerabilidades Críticas: $CRITICAL_COUNT"
+          echo "Vulnerabilidades Altas: $HIGH_COUNT"
+          echo "Vulnerabilidades Médias: $MEDIUM_COUNT"
+          echo "Vulnerabilidades Baixas: $LOW_COUNT"
+
+      - name: Slack notification
+        id: slack-notification
+        run: |
+          if [ "$HIGH_COUNT" -ge 1 ] || [ "$CRITICAL_COUNT" -ge 1 ]; then
+            echo "enviando notificações..."
+          
+          response_json=$(curl -H 'Authorization: Bearer $SLACK_BOT_TOKEN' -H 'Content-type: application/json; charset=utf-8' --data '{"channel":"$SLACK_CHANNEL","text":":alert: Alerta de vulnerabilidade :alert:"}' https://slack.com/api/chat.postMessage)
+          thread_ts=$(echo "$response_json" |jq -r .ts)
+          echo "$thread_ts"
+          blocks=$(jq -r '
+          (
+            [.results[] | select(.extra.severity | IN "ERROR", "CRITICAL")] as $issues |
+            [
+              {
+                "type": "header",
+                "text": {
+                  "type": "plain_text",
+                  "text": "🔍 Alertas de Segurança do Semgrep"
+                }
+              },
+              {
+                "type": "section",
+                "text": {
+                  "type": "mrkdwn",
+                  "text": "Encontramos *" + ($issues | length | tostring) + " problemas* na sua alteração que precisam de atenção."
+                }
+              },
+              {
+                "type": "divider"
+              }
+            ] +
+            (
+              $issues | map(
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*" + .extra.severity + "* - `" + .check_id + "`\n📁 `" + .path + "` (linha " + (.start.line | tostring) + ")\n💬 " + (.extra.message | gsub("[\\n\\r]+"; " "))
+                  },
+                  "accessory": {
+                    "type": "button",
+                    "text": {
+                      "type": "plain_text",
+                      "text": "📋 Ver mais detalhes"
+                    },
+                    "url": ("${{ github.server_url }}/${{ github.repository }}/security/code-scanning?query="%22" + .check_id + "%22+is:open"),
+                    "action_id": ("view_details_" + .check_id)
+                  }
+                }
+              )
+            )
+          )' $JSON_FILENAME)
+
+          curl -H 'Authorization: Bearer $SLACK_BOT_TOKEN' \
+              -H 'Content-type: application/json; charset=utf-8' \
+              --data @- \
+              https://slack.com/api/chat.postMessage << EOF
+          {
+            "channel": "$SLACK_BOT_TOKEN",
+            "thread_ts": "$thread_ts",
+            "blocks": $blocks
+          }
+          EOF
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL: ${{ secrets.SLACK_CHANNEL }}
 
       - name: Run Semgrep Full scan
         if: ${{ inputs.scan-mode == 'push'}}
@@ -164,22 +222,9 @@ jobs:
             --exclude 'node_modules/**,dist/**,build/**,*.min.js,*.bundle.js' \
             --timeout 1800 \
             --max-memory 4096
-
-      - name: Count, Display, and Check Vulnerabilities
-        id: count_vulns
-        run: |
-          HIGH_COUNT=$(jq '[.results[].extra | select(.severity == "ERROR")] | length' "$JSON_FILENAME")
-          MEDIUM_COUNT=$(jq '[.results[].extra | select(.severity == "WARNING")] | length' "$JSON_FILENAME")
-          LOW_COUNT=$(jq '[.results[].extra | select(.severity == "INFO")] | length' "$JSON_FILENAME")
-          echo "HIGH_COUNT=$HIGH_COUNT" >> $GITHUB_ENV
-          echo "MEDIUM_COUNT=$MEDIUM_COUNT" >> $GITHUB_ENV
-          echo "LOW_COUNT=$LOW_COUNT" >> $GITHUB_ENV
-          echo "Repository: $REPO_NAME"
-          echo "PR Number: $PR_NUMBER"
-          echo "Scan Timestamp: $TIMESTAMP"
-          echo "Vulnerabilidades Altas: $HIGH_COUNT"
-          echo "Vulnerabilidades Médias: $MEDIUM_COUNT"
-          echo "Vulnerabilidades Baixas: $LOW_COUNT"
+        continue-on-error: true
+        env:
+          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
 
       - name: Upload SARIF to Code Scanning
         uses: github/codeql-action/upload-sarif@v3
@@ -192,11 +237,3 @@ jobs:
           name: "${{ env.JSON_FILENAME }}"
           path: "${{ env.JSON_FILENAME }}"
           retention-days: 30
-
-      - name: Slack notification
-        id: slack-notification
-        run: |
-          if [ "$HIGH_COUNT" -ge 1 ]; then
-            echo "::error::Foram identificadas vulnerabilidades com severidade alta."
-            echo "enviando notificações..."
-          fi
