@@ -85,6 +85,8 @@ jobs:
           else
             echo "Suas alterações estão **ben seguras**."
           fi
+          json_output=$(echo "$JSON_FILENAME") >> $GITHUB_OUTPUT 
+        continue-on-error: true
         env:
           SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -120,6 +122,7 @@ jobs:
             --timeout 1800 \
             --max-memory 4096 \
             ${{ steps.detect_push_changed_files.outputs.changed_files }}
+          json_output=$(echo "$JSON_FILENAME") >> $GITHUB_OUTPUT 
         continue-on-error: true
         env:
           SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
@@ -147,6 +150,11 @@ jobs:
       - name: Slack notification
         id: slack-notification
         run: |
+          if [ ${{ inputs.scan-mode == 'push'}} ]; then
+            JSON_FILENAME=${{steps.semgrep-push.outputs.json_output}}
+          else
+            JSON_FILENAME=${{steps.semgrep-pr.outputs.json_output}}
+          fi
           if [ "$HIGH_COUNT" -ge 1 ] || [ "$CRITICAL_COUNT" -ge 1 ]; then
             echo "enviando notificações..."
           
