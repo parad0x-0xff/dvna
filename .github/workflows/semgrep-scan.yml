@@ -68,7 +68,7 @@ jobs:
             echo "Vulnerabilidades encontradas. Formatando o comentário para o PR..."
 
             # Conta as vulnerabilidades com severidade crítica alta
-            VULNERABILITIES=$(_COUNT=$(jq '[.results[].extra | select(.extra.severity | IN("ERROR", "CRITICAL"))] | length' "$JSON_FILENAME")
+            VULNERABILITIES=$(jq '[.results[].extra | select(.extra.severity | IN("ERROR", "CRITICAL"))] | length' "$JSON_FILENAME")
             
             if [ "$VULNERABILITIES" -ge 1 ]; then
               SCAN_URL="${{ github.server_url }}/${{ github.repository }}/security/code-scanning?query=pr:${{ github.event.pull_request.number }}"
@@ -130,8 +130,8 @@ jobs:
         run: |
           CRITICAL_COUNT=$(jq '[.results[].extra | select(.extra.severity == "CRITICAL")] | length' "$JSON_FILENAME")
           HIGH_COUNT=$(jq '[.results[].extra | select(.extra.severity == "ERROR")] | length' "$JSON_FILENAME")
-          MEDIUM_COUNT=$(jq '[.results[].extra | select(.severity == "WARNING")] | length' "$JSON_FILENAME")
-          LOW_COUNT=$(jq '[.results[].extra | select(.severity == "INFO")] | length' "$JSON_FILENAME")
+          MEDIUM_COUNT=$(jq '[.results[].extra | select(.extra.severity == "WARNING")] | length' "$JSON_FILENAME")
+          LOW_COUNT=$(jq '[.results[].extra | select(.extra.severity == "INFO")] | length' "$JSON_FILENAME")
           echo "CRITICAL_COUNT=$CRITICAL_COUNT" >> $GITHUB_ENV
           echo "HIGH_COUNT=$HIGH_COUNT" >> $GITHUB_ENV
           echo "MEDIUM_COUNT=$MEDIUM_COUNT" >> $GITHUB_ENV
@@ -202,11 +202,11 @@ jobs:
                 --data @- \
                 https://slack.com/api/chat.postMessage << EOF
             {
-              "channel": "$SLACK_BOT_TOKEN",
+              "channel": "$SLACK_CHANNEL",
               "thread_ts": "$thread_ts",
               "blocks": $blocks
             }
-            EOF
+          EOF
           fi
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
