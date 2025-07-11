@@ -62,6 +62,7 @@ jobs:
             --timeout 1800 \
             --max-memory 4096 \
             $CHANGED_FILES
+          echo "json_output=$JSON_FILENAME" >> $GITHUB_OUTPUT
 
           # Verifica se o arquivo JSON foi criado e contém resultados
           if [ -f "$JSON_FILENAME" ] && [ $(jq '.results | length' "$JSON_FILENAME") -gt 0 ]; then
@@ -85,7 +86,6 @@ jobs:
           else
             echo "Suas alterações estão **ben seguras**."
           fi
-          json_output=$(echo "$JSON_FILENAME") >> $GITHUB_OUTPUT 
         continue-on-error: true
         env:
           SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
@@ -103,11 +103,11 @@ jobs:
 
           if [ -z "$CHANGED_FILES" ]; then
             echo "Nenhum arquivo modificado para escanear."
-            # Define a saída como vazia para os próximos passos
-            CHANGED_FILES='' >> $GITHUB_OUTPUT
+            echo "changed_files=" >> $GITHUB_OUTPUT
           else
             echo "Arquivos a serem escaneados:"
-            echo "CHANGED_FILES=$(echo "$CHANGED_FILES" | tr '\n' ' ')" >> $GITHUB_OUTPUT
+            # Garante que a lista de arquivos seja uma única linha para o próximo passo
+            echo "changed_files=$(echo "$CHANGED_FILES" | tr '\n' ' ')" >> $GITHUB_OUTPUT
             echo $CHANGED_FILES
           fi 
 
@@ -122,7 +122,7 @@ jobs:
             --timeout 1800 \
             --max-memory 4096 \
             ${{ steps.detect_push_changed_files.outputs.changed_files }}
-          json_output=$(echo "$JSON_FILENAME") >> $GITHUB_OUTPUT 
+          echo "json_output=$JSON_FILENAME" >> $GITHUB_OUTPUT
         continue-on-error: true
         env:
           SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
@@ -135,10 +135,10 @@ jobs:
           HIGH_COUNT=$(jq '[.results[].extra | select(.severity == "ERROR")] | length' "$JSON_FILENAME")
           MEDIUM_COUNT=$(jq '[.results[].extra | select(.severity == "WARNING")] | length' "$JSON_FILENAME")
           LOW_COUNT=$(jq '[.results[].extra | select(.severity == "INFO")] | length' "$JSON_FILENAME")
-          echo "CRITICAL_COUNT=$CRITICAL_COUNT" >> $GITHUB_ENV
-          echo "HIGH_COUNT=$HIGH_COUNT" >> $GITHUB_ENV
-          echo "MEDIUM_COUNT=$MEDIUM_COUNT" >> $GITHUB_ENV
-          echo "LOW_COUNT=$LOW_COUNT" >> $GITHUB_ENV
+          echo "CRITICAL_COUNT=$CRITICAL_COUNT" >> $GITHUB_OUTPUT
+          echo "HIGH_COUNT=$HIGH_COUNT" >> $GITHUB_OUTPUT
+          echo "MEDIUM_COUNT=$MEDIUM_COUNT" >> $GITHUB_OUTPUT
+          echo "LOW_COUNT=$LOW_COUNT" >> $GITHUB_OUTPUT
           echo "Repository: $REPO_NAME"
           echo "PR Number: $PR_NUMBER"
           echo "Scan Timestamp: $TIMESTAMP"
@@ -149,25 +149,44 @@ jobs:
 
       - name: Slack notification
         id: slack-notification
+        # Executa apenas se houver vulnerabilidades críticas ou altas
+        if: steps.count_vulns.outputs.CRITICAL_COUNT > 0 || steps.count_vulns.outputs.HIGH_COUNT > 0
         run: |
-          if [ ${{ inputs.scan-mode == 'push'}} ]; then
-            JSON_FILENAME=${{steps.semgrep-push.outputs.json_output}}
-          else
-            JSON_FILENAME=${{steps.semgrep-pr.outputs.json_output}}
-          fi
-          if [ "$HIGH_COUNT" -ge 1 ] || [ "$CRITICAL_COUNT" -ge 1 ]; then
-            echo "enviando notificações..."
-          
-            response_json=$(curl -H 'Authorization: Bearer $SLACK_BOT_TOKEN' -H 'Content-type: application/json; charset=utf-8' --data '{"channel":"$SLACK_CHANNEL","text":":alert: Alerta de vulnerabilidade :alert:"}' https://slack.com/api/chat.postMessage)
-            thread_ts=$(echo "$response_json" |jq -r .ts)
-            echo "$thread_ts"
-            blocks=$(jq '[.results[] | select(.extra.severity | IN("ERROR", "CRITICAL"))] as $issues | { "blocks": [{"type": "header", "text": {"type": "plain_text", "text": "🔍 Análise de Segurança - Semgrep"}}, {"type": "section", "text": {"type": "mrkdwn", "text": "Encontramos *" + ($issues | length | tostring) + " problemas* na sua alteração que precisam de atenção."}}, {"type": "divider"}] + ($issues | map({"type": "section", "text": {"type": "mrkdwn", "text": "*" + .extra.severity + "* - `" + .check_id + "`\n📁 `" + .path + "` (linha " + (.start.line | tostring) + ")\n💬 " + (.extra.message | gsub("[\n\r]+"; " "))}, "accessory": {"type": "button", "text": {"type": "plain_text", "text": "📋 Ver mais detalhes"}, "url": ("${{ github.server_url }}/${{ github.repository }}/security/code-scanning?query=%22" + .check_id + "%22+is:open"), "action_id": ("view_details_" + .check_id)}})) }' $JSON_FILENAME)
+          echo "Enviando notificações para o Slack..."
 
-            curl -H 'Authorization: Bearer $SLACK_BOT_TOKEN' \
-                -H 'Content-type: application/json; charset=utf-8' \
-                --data {"channel": "$SLACK_CHANNEL","thread_ts": "$thread_ts","blocks": $blocks}
-                https://slack.com/api/chat.postMessage
+          # Define o nome do arquivo JSON com base no modo de scan
+          if [ "${{ inputs.scan-mode }}" == 'push' ]; then
+            JSON_FILE="${{ steps.semgrep-push.outputs.json_output }}"
+          else
+            JSON_FILE="${{ steps.semgrep-pr.outputs.json_output }}"
           fi
+
+          # Inicia uma thread no Slack
+          response_json=$(curl -s -X POST https://slack.com/api/chat.postMessage \
+            -H "Authorization: Bearer ${{ secrets.SLACK_BOT_TOKEN }}" \
+            -H "Content-type: application/json; charset=utf-8" \
+            --data '{"channel":"${{ secrets.SLACK_CHANNEL }}","text":":alert: Alerta de vulnerabilidade :alert:"}')
+          
+          thread_ts=$(echo "$response_json" | jq -r .ts)
+          echo "Thread do Slack criada: $thread_ts"
+
+          # Gera o corpo da mensagem (blocks) com jq, passando variáveis do GitHub como argumentos
+          blocks=$(jq -n --argjson issues "$(jq '[.results[] | select(.extra.severity | IN("ERROR", "CRITICAL"))]' "$JSON_FILE")" \
+                           --arg server_url "${{ github.server_url }}" \
+                           --arg repo "${{ github.repository }}" \
+                           '{ "blocks": [{"type": "header", "text": {"type": "plain_text", "text": "🔍 Análise de Segurança - Semgrep"}}, {"type": "section", "text": {"type": "mrkdwn", "text": "Encontramos *" + ($issues | length | tostring) + " problemas* na sua alteração que precisam de atenção."}}, {"type": "divider"}] + ($issues | map({"type": "section", "text": {"type": "mrkdwn", "text": "*" + .extra.severity + "* - `" + .check_id + "`\n📁 `" + .path + "` (linha " + (.start.line | tostring) + ")\n💬 " + (.extra.message | gsub("[\n\r]+"; " "))}, "accessory": {"type": "button", "text": {"type": "plain_text", "text": "📋 Ver mais detalhes"}, "url": ($server_url + "/" + $repo + "/security/code-scanning?query=%22" + .check_id + "%22+is:open"), "action_id": ("view_details_" + .check_id)}})) }')
+
+          # Envia a mensagem detalhada para a thread do Slack usando um heredoc
+          curl -s -X POST https://slack.com/api/chat.postMessage \
+            -H "Authorization: Bearer ${{ secrets.SLACK_BOT_TOKEN }}" \
+            -H "Content-type: application/json; charset=utf-8" \
+            --data @- << EOF
+            {
+              "channel": "${{ secrets.SLACK_CHANNEL }}",
+              "thread_ts": "$thread_ts",
+              "blocks": $blocks
+            }
+          EOF
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_CHANNEL: ${{ secrets.SLACK_CHANNEL }}
