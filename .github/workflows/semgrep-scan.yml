@@ -153,60 +153,12 @@ jobs:
             response_json=$(curl -H 'Authorization: Bearer $SLACK_BOT_TOKEN' -H 'Content-type: application/json; charset=utf-8' --data '{"channel":"$SLACK_CHANNEL","text":":alert: Alerta de vulnerabilidade :alert:"}' https://slack.com/api/chat.postMessage)
             thread_ts=$(echo "$response_json" |jq -r .ts)
             echo "$thread_ts"
-            blocks=$(jq -r '
-            (
-              [.results[] | select(.extra.severity | IN "ERROR", "CRITICAL")] as $issues |
-              [
-                {
-                  "type": "header",
-                  "text": {
-                    "type": "plain_text",
-                    "text": "🔍 Alertas de Segurança do Semgrep"
-                  }
-                },
-                {
-                  "type": "section",
-                  "text": {
-                    "type": "mrkdwn",
-                    "text": "Encontramos *" + ($issues | length | tostring) + " problemas* na sua alteração que precisam de atenção."
-                  }
-                },
-                {
-                  "type": "divider"
-                }
-              ] +
-              (
-                $issues | map(
-                  {
-                    "type": "section",
-                    "text": {
-                      "type": "mrkdwn",
-                      "text": "*" + .extra.severity + "* - `" + .check_id + "`\n📁 `" + .path + "` (linha " + (.start.line | tostring) + ")\n💬 " + (.extra.message | gsub("[\\n\\r]+"; " "))
-                    },
-                    "accessory": {
-                      "type": "button",
-                      "text": {
-                        "type": "plain_text",
-                        "text": "📋 Ver mais detalhes"
-                      },
-                      "url": ("${{ github.server_url }}/${{ github.repository }}/security/code-scanning?query="%22" + .check_id + "%22+is:open"),
-                      "action_id": ("view_details_" + .check_id)
-                    }
-                  }
-                )
-              )
-            )' $JSON_FILENAME)
+            blocks=$(jq '[.results[] | select(.extra.severity | IN("ERROR", "CRITICAL"))] as $issues | { "blocks": [{"type": "header", "text": {"type": "plain_text", "text": "🔍 Análise de Segurança - Semgrep"}}, {"type": "section", "text": {"type": "mrkdwn", "text": "Encontramos *" + ($issues | length | tostring) + " problemas* na sua alteração que precisam de atenção."}}, {"type": "divider"}] + ($issues | map({"type": "section", "text": {"type": "mrkdwn", "text": "*" + .extra.severity + "* - `" + .check_id + "`\n📁 `" + .path + "` (linha " + (.start.line | tostring) + ")\n💬 " + (.extra.message | gsub("[\n\r]+"; " "))}, "accessory": {"type": "button", "text": {"type": "plain_text", "text": "📋 Ver mais detalhes"}, "url": ("${{ github.server_url }}/${{ github.repository }}/security/code-scanning?query=%22" + .check_id + "%22+is:open"), "action_id": ("view_details_" + .check_id)}})) }' $JSON_FILENAME)
 
             curl -H 'Authorization: Bearer $SLACK_BOT_TOKEN' \
                 -H 'Content-type: application/json; charset=utf-8' \
-                --data @- \
-                https://slack.com/api/chat.postMessage << EOF
-            {
-              "channel": "$SLACK_CHANNEL",
-              "thread_ts": "$thread_ts",
-              "blocks": $blocks
-            }
-          EOF
+                --data {"channel": "$SLACK_CHANNEL","thread_ts": "$thread_ts","blocks": $blocks}
+                https://slack.com/api/chat.postMessage
           fi
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
