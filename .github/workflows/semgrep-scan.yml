@@ -202,6 +202,19 @@ jobs:
         run: |
           echo "Enviando notificações para o Slack..."
 
+          # Verifica se os secrets estão disponíveis
+          if [ -z "$SLACK_BOT_TOKEN" ] || [ -z "$SLACK_CHANNEL" ]; then
+            echo "❌ Secrets do Slack não estão configurados ou não foram passados corretamente."
+            echo "SLACK_BOT_TOKEN está vazio: $([ -z "$SLACK_BOT_TOKEN" ] && echo "Sim" || echo "Não")"
+            echo "SLACK_CHANNEL está vazio: $([ -z "$SLACK_CHANNEL" ] && echo "Sim" || echo "Não")"
+            echo "Verifique se os secrets SLACK_BOT_TOKEN e SLACK_CHANNEL estão configurados no repositório que chama este workflow."
+            exit 0
+          fi
+
+          echo "✅ Secrets do Slack encontrados"
+          echo "Canal: $SLACK_CHANNEL"
+          echo "Token presente: $([ -n "$SLACK_BOT_TOKEN" ] && echo "Sim (${#SLACK_BOT_TOKEN} caracteres)" || echo "Não")"
+
           # Define o nome do arquivo JSON com base no modo de scan
           if [ "${{ inputs.scan-mode }}" == 'push' ]; then
             JSON_FILE="${{ steps.semgrep-push.outputs.json_output }}"
@@ -224,13 +237,21 @@ jobs:
           fi
 
           # Inicia uma thread no Slack
+          echo "Enviando mensagem para o Slack..."
           response_json=$(curl -s -X POST https://slack.com/api/chat.postMessage \
-            -H "Authorization: Bearer ${{ secrets.SLACK_BOT_TOKEN }}" \
+            -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
             -H "Content-type: application/json; charset=utf-8" \
-            --data '{"channel":"${{ secrets.SLACK_CHANNEL }}","text":":alert: Alerta de vulnerabilidade :alert:"}')
+            --data '{"channel":"'$SLACK_CHANNEL'","text":":alert: Alerta de vulnerabilidade :alert:"}')
+          
+          echo "Resposta do Slack: $response_json"
+          
+          if [ "$(echo "$response_json" | jq -r .ok)" != "true" ]; then
+            echo "❌ Erro ao enviar mensagem: $(echo "$response_json" | jq -r .error)"
+            exit 1
+          fi
           
           thread_ts=$(echo "$response_json" | jq -r .ts)
-          echo "Thread do Slack criada: $thread_ts"
+          echo "✅ Thread do Slack criada: $thread_ts"
 
           # Gera o payload usando o script shell
           payload=$(./generate_slack_payload.sh "$JSON_FILE" "${{ github.server_url }}" "${{ github.repository }}")
