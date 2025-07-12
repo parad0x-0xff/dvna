@@ -13,10 +13,10 @@ on:
         required: true
       SLACK_BOT_TOKEN:
         description: 'Token do bot do Slack'
-        required: true
+        required: false
       SLACK_CHANNEL:
         description: 'Canal do Slack'
-        required: true
+        required: false
 
 
 # Declara as permissões máximas que este workflow pode precisar
@@ -156,8 +156,16 @@ jobs:
 
       - name: Create Slack payload generator
         run: |
-          cat > slack_payload.jq << 'EOF'
-          [.results[] | select(.extra.severity | IN("ERROR", "CRITICAL"))] as $issues |
+          cat > generate_slack_payload.sh << 'EOF'
+          #!/bin/bash
+          JSON_FILE="$1"
+          SERVER_URL="$2"
+          REPO="$3"
+          
+          # Gera uma mensagem simples para o Slack
+          ISSUE_COUNT=$(jq '[.results[] | select(.extra.severity | IN("ERROR", "CRITICAL"))] | length' "$JSON_FILE")
+          
+          cat << EOJ
           {
             "blocks": [
               {
@@ -171,32 +179,21 @@ jobs:
                 "type": "section",
                 "text": {
                   "type": "mrkdwn",
-                  "text": ("Encontramos *" + ($issues | length | tostring) + " problemas* na sua alteração que precisam de atenção.")
+                  "text": "Encontramos *${ISSUE_COUNT} problemas* críticos/altos na sua alteração que precisam de atenção."
                 }
               },
               {
-                "type": "divider"
-              }
-            ] + (
-              $issues | map({
                 "type": "section",
                 "text": {
                   "type": "mrkdwn",
-                  "text": ("*" + .extra.severity + "* - `" + .check_id + "`\n📁 `" + .path + "` (linha " + (.start.line | tostring) + ")\n💬 " + (.extra.message | gsub("[\n\r]+"; " ")))
-                },
-                "accessory": {
-                  "type": "button",
-                  "text": {
-                    "type": "plain_text",
-                    "text": "📋 Ver mais detalhes"
-                  },
-                  "url": ($server_url + "/" + $repo + "/security/code-scanning?query=%22" + .check_id + "%22+is:open"),
-                  "action_id": ("view_details_" + .check_id)
+                  "text": "📋 [Ver detalhes completos no Code Scanning](${SERVER_URL}/${REPO}/security/code-scanning)"
                 }
-              })
-            )
+              }
+            ]
           }
+          EOJ
           EOF
+          chmod +x generate_slack_payload.sh
 
       - name: Slack notification
         id: slack-notification
@@ -235,8 +232,8 @@ jobs:
           thread_ts=$(echo "$response_json" | jq -r .ts)
           echo "Thread do Slack criada: $thread_ts"
 
-          # Gera o payload usando o arquivo jq e variáveis de ambiente
-          payload=$(jq --arg server_url "${{ github.server_url }}" --arg repo "${{ github.repository }}" -f slack_payload.jq "$JSON_FILE")
+          # Gera o payload usando o script shell
+          payload=$(./generate_slack_payload.sh "$JSON_FILE" "${{ github.server_url }}" "${{ github.repository }}")
           
           # Cria o payload final com channel e thread_ts
           final_payload=$(echo "$payload" | jq --arg channel "${{ secrets.SLACK_CHANNEL }}" --arg thread_ts "$thread_ts" '. + {"channel": $channel, "thread_ts": $thread_ts}')
