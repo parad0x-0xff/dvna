@@ -69,7 +69,7 @@ jobs:
             echo "Vulnerabilidades encontradas. Formatando o comentário para o PR..."
 
             # Conta as vulnerabilidades com severidade crítica alta
-            VULNERABILITIES=$(jq '[.results[].extra | select(.extra.severity | IN("ERROR", "CRITICAL"))] | length' "$JSON_FILENAME")
+            VULNERABILITIES=$(jq '[.results[] | select(.extra.severity | IN("ERROR", "CRITICAL"))] | length' "$JSON_FILENAME")
             
             if [ "$VULNERABILITIES" -ge 1 ]; then
               SCAN_URL="${{ github.server_url }}/${{ github.repository }}/security/code-scanning?query=pr:${{ github.event.pull_request.number }}"
@@ -131,10 +131,10 @@ jobs:
       - name: Count, Display, and Check Vulnerabilities
         id: count_vulns
         run: |
-          CRITICAL_COUNT=$(jq '[.results[].extra | select(.severity == "CRITICAL")] | length' "$JSON_FILENAME")
-          HIGH_COUNT=$(jq '[.results[].extra | select(.severity == "ERROR")] | length' "$JSON_FILENAME")
-          MEDIUM_COUNT=$(jq '[.results[].extra | select(.severity == "WARNING")] | length' "$JSON_FILENAME")
-          LOW_COUNT=$(jq '[.results[].extra | select(.severity == "INFO")] | length' "$JSON_FILENAME")
+          CRITICAL_COUNT=$(jq '[.results[] | select(.extra.severity == "CRITICAL")] | length' "$JSON_FILENAME")
+          HIGH_COUNT=$(jq '[.results[] | select(.extra.severity == "ERROR")] | length' "$JSON_FILENAME")
+          MEDIUM_COUNT=$(jq '[.results[] | select(.extra.severity == "WARNING")] | length' "$JSON_FILENAME")
+          LOW_COUNT=$(jq '[.results[] | select(.extra.severity == "INFO")] | length' "$JSON_FILENAME")
           echo "CRITICAL_COUNT=$CRITICAL_COUNT" >> $GITHUB_OUTPUT
           echo "HIGH_COUNT=$HIGH_COUNT" >> $GITHUB_OUTPUT
           echo "MEDIUM_COUNT=$MEDIUM_COUNT" >> $GITHUB_OUTPUT
@@ -228,16 +228,11 @@ jobs:
           payload=$(jq --arg server_url "$server_url" --arg repo "$repo" -f slack_payload.jq "$JSON_FILE")
           
           # Envia a mensagem detalhada para a thread do Slack
+          echo "$payload" | jq --arg channel "${{ secrets.SLACK_CHANNEL }}" --arg thread_ts "$thread_ts" '. + {"channel": $channel, "thread_ts": $thread_ts}' | \
           curl -s -X POST https://slack.com/api/chat.postMessage \
             -H "Authorization: Bearer ${{ secrets.SLACK_BOT_TOKEN }}" \
             -H "Content-type: application/json; charset=utf-8" \
-            --data @- << EOF
-          {
-            "channel": "${{ secrets.SLACK_CHANNEL }}",
-            "thread_ts": "$thread_ts",
-            "blocks": $payload.blocks
-          }
-          EOF
+            --data @-
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_CHANNEL: ${{ secrets.SLACK_CHANNEL }}
