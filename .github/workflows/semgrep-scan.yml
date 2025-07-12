@@ -147,6 +147,51 @@ jobs:
           echo "Vulnerabilidades Médias: $MEDIUM_COUNT"
           echo "Vulnerabilidades Baixas: $LOW_COUNT"
 
+      - name: Create Slack payload generator
+        run: |
+          cat > slack_payload.jq << 'EOF'
+          {
+            "blocks": [
+              {
+                "type": "header",
+                "text": {
+                  "type": "plain_text",
+                  "text": "🔍 Análise de Segurança - Semgrep"
+                }
+              },
+              {
+                "type": "section",
+                "text": {
+                  "type": "mrkdwn",
+                  "text": ("Encontramos *" + ([.results[] | select(.extra.severity | IN("ERROR", "CRITICAL"))] | length | tostring) + " problemas* na sua alteração que precisam de atenção.")
+                }
+              },
+              {
+                "type": "divider"
+              }
+            ] + (
+              [.results[] | select(.extra.severity | IN("ERROR", "CRITICAL"))] | map(
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": ("*" + .extra.severity + "* - `" + .check_id + "`\n📁 `" + .path + "` (linha " + (.start.line | tostring) + ")\n💬 " + (.extra.message | gsub("[\n\r]+"; " ")))
+                  },
+                  "accessory": {
+                    "type": "button",
+                    "text": {
+                      "type": "plain_text",
+                      "text": "📋 Ver mais detalhes"
+                    },
+                    "url": ($server_url + "/" + $repo + "/security/code-scanning?query=%22" + .check_id + "%22+is:open"),
+                    "action_id": ("view_details_" + .check_id)
+                  }
+                }
+              )
+            )
+          }
+          EOF
+
       - name: Slack notification
         id: slack-notification
         # Executa apenas se houver vulnerabilidades críticas ou altas
@@ -161,6 +206,12 @@ jobs:
             JSON_FILE="${{ steps.semgrep-pr.outputs.json_output }}"
           fi
 
+          # Verifica se o arquivo JSON existe
+          if [ ! -f "$JSON_FILE" ]; then
+            echo "Arquivo JSON não encontrado: $JSON_FILE"
+            exit 1
+          fi
+
           # Inicia uma thread no Slack
           response_json=$(curl -s -X POST https://slack.com/api/chat.postMessage \
             -H "Authorization: Bearer ${{ secrets.SLACK_BOT_TOKEN }}" \
@@ -170,22 +221,22 @@ jobs:
           thread_ts=$(echo "$response_json" | jq -r .ts)
           echo "Thread do Slack criada: $thread_ts"
 
-          # Gera o corpo da mensagem (blocks) com jq, passando variáveis do GitHub como argumentos
-          blocks=$(jq -n --argjson issues "$(jq '[.results[] | select(.extra.severity | IN("ERROR", "CRITICAL"))]' "$JSON_FILE")" \
-                           --arg server_url "${{ github.server_url }}" \
-                           --arg repo "${{ github.repository }}" \
-                           '{ "blocks": [{"type": "header", "text": {"type": "plain_text", "text": "🔍 Análise de Segurança - Semgrep"}}, {"type": "section", "text": {"type": "mrkdwn", "text": "Encontramos *" + ($issues | length | tostring) + " problemas* na sua alteração que precisam de atenção."}}, {"type": "divider"}] + ($issues | map({"type": "section", "text": {"type": "mrkdwn", "text": "*" + .extra.severity + "* - `" + .check_id + "`\n📁 `" + .path + "` (linha " + (.start.line | tostring) + ")\n💬 " + (.extra.message | gsub("[\n\r]+"; " "))}, "accessory": {"type": "button", "text": {"type": "plain_text", "text": "📋 Ver mais detalhes"}, "url": ($server_url + "/" + $repo + "/security/code-scanning?query=%22" + .check_id + "%22+is:open"), "action_id": ("view_details_" + .check_id)}})) }')
-
-          # Envia a mensagem detalhada para a thread do Slack usando um heredoc
+          # Gera o payload usando o arquivo jq e variáveis de ambiente
+          export server_url="${{ github.server_url }}"
+          export repo="${{ github.repository }}"
+          
+          payload=$(jq --arg server_url "$server_url" --arg repo "$repo" -f slack_payload.jq "$JSON_FILE")
+          
+          # Envia a mensagem detalhada para a thread do Slack
           curl -s -X POST https://slack.com/api/chat.postMessage \
             -H "Authorization: Bearer ${{ secrets.SLACK_BOT_TOKEN }}" \
             -H "Content-type: application/json; charset=utf-8" \
             --data @- << EOF
-            {
-              "channel": "${{ secrets.SLACK_CHANNEL }}",
-              "thread_ts": "$thread_ts",
-              "blocks": $blocks
-            }
+          {
+            "channel": "${{ secrets.SLACK_CHANNEL }}",
+            "thread_ts": "$thread_ts",
+            "blocks": $payload.blocks
+          }
           EOF
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
